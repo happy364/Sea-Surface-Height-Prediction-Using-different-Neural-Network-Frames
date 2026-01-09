@@ -105,10 +105,9 @@ class RNN(nn.Module):
     Linxiao Huang
     2025.11.14
     '''
-    def __init__(self, configs, mask_valid):
+    def __init__(self, configs):
         """
         :param configs:
-        :param mask_valid: (H,W), Ture for valid, False for invalid
         """
         super(RNN, self).__init__()
         configs = convert_configs(configs)

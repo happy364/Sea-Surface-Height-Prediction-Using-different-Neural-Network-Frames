@@ -150,7 +150,7 @@ class Mask_PredFormer_Model(nn.Module):
         # =============================================================
         # 1) ---- Precompute mask & valid patches ----
         # =============================================================
-        mask = torch.from_numpy(mask)          # (H, W)
+
         mask = mask.unsqueeze(0).repeat(self.Cin, 1, 1)  # (Cin, H, W)
 
         # mask → patch flatten

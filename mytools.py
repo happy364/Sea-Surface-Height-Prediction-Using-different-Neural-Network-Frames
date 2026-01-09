@@ -7,6 +7,7 @@ import random
 import os
 import math
 from configs import get_my_config
+
 config = get_my_config()
 class ConfigObject:
     """将字典转换为对象的包装类"""
@@ -124,21 +125,22 @@ class MSELossIgnoreNaN(nn.Module):
         return loss
 
 class MSELossIgnoreNaNv2(nn.Module):
-    def __init__(self, mask_valid, model_configs=None,config=config,  patched=False):
+    def __init__(self, mask_valid, model_configs=None, config=config,  patched=False):
         """
         :param mask_valid: valid: True, invalid: False
         :param rnn2configs: model config
         :param patched: if the pred and target are patched
         """
         super().__init__()
+        self.model_configs = convert_configs(model_configs)
         self.mse_func = nn.MSELoss(reduction="sum")
         self.mask_valid = mask_valid
         H, W = self.mask_valid.shape
         C = config.output_channels
-        self.mask_valid = torch.from_numpy(self.mask_valid[None,None,None,:,:]).to(device=config.device)
+        self.mask_valid = self.mask_valid[None,None,None,:,:].to(device=config.device)
 
         if patched:
-            p = model_configs.patch_size
+            p = self.model_configs.patch_size
             self.mask_valid = self.mask_valid.expand(1,1,C,H,W)
             print(f"after 1: {self.mask_valid.shape}")
             self.mask_valid = self.mask_valid.reshape(C, H // p, p, W // p, p)

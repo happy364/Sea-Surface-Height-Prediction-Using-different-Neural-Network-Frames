@@ -10,14 +10,18 @@ class MvDataset(Dataset):
 
         if mode == 'train':
             time_span = slice(args.start_time_train, args.end_time_train)
+            # data_path = args.base / f"train.nc"
         elif mode == 'eval':
             time_span = slice(args.start_time_val, args.end_time_val)
+            # data_path = args.base / f"val.nc"
         elif mode == 'test':
             time_span = slice(args.start_time_test, args.end_time_test)
+            # data_path = args.base / f"test.nc"
         else:
             raise ValueError('mode must be train, eval or test')
 
         self.data = self.data.sel(time=time_span)
+        # self.data = xr.open_dataset(data_path)
         self.lat = self.data.latitude.values
         self.lon = self.data.longitude.values
 
@@ -40,8 +44,17 @@ class MvDataset(Dataset):
         self.mean = np.load(args.path_means)
         self.std = np.load(args.path_stds)
         if norm:
-            for i in range(self.field_data.shape[1]):
-                self.field_data[:, i, ...] = (self.field_data[:, i, ...] - self.mean[i]) / self.std[i]
+            print(self.field.shape)
+            print(self.mean.shape)
+            print(f"mean: {self.mean}, std: {self.std}")
+            for i in range(self.field.shape[1]):
+                if isinstance(self.mean, (int, float, np.number)):
+                    self.field[:, i, ...] = (self.field[:, i, ...] - self.mean) / self.std
+                elif self.mean.ndim == 0:
+                    self.field[:, i, ...] = (self.field[:, i, ...] - self.mean) / self.std
+                else:
+                    self.field[:, i, ...] = (self.field[:, i, ...] - self.mean[i]) / self.std[i]
+
 
         if args.need_wind:
             self.wind_data = xr.open_dataset(args.wind_path).sel(time=time_span)
@@ -78,19 +91,22 @@ class MvDataset(Dataset):
             # 再 reshape 合并 patch 内像素到通道维度
             self.field = self.field.reshape(T, C * p * p, H // p, W // p)
 
+        self.field = torch.from_numpy(self.field)
+
+
     def __len__(self):
         return len(self.data.time)-self.input_length-self.output_length+1
 
     def __getitem__(self, idx):
         if self.args.model_name == 'predrnn':
-            datax = self.field[idx:idx+self.input_length+self.output_length]
-            return torch.from_numpy(datax)
+            data = self.field[idx:idx+self.input_length+self.output_length]
+            return data
         else:
-            datax = np.nan_to_num(self.field[idx:idx+self.input_length])
+            datax = self.field[idx:idx+self.input_length]
 
             datay = self.field[idx+self.input_length:idx+self.input_length+self.output_length, :self.args.output_channels]
 
-            return torch.from_numpy(datax), torch.from_numpy(datay)
+            return datax, datay
 
 if __name__ == '__main__':
     from configs import parse_args

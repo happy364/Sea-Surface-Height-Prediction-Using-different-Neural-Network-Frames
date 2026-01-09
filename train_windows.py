@@ -3,7 +3,7 @@ import os
 mask_predformer = [False, True]
 
 need_mask = [False, True]
-# need_mask = [need_mask[0]]
+need_mask = [need_mask[0]]
 
 vars = ['ssh','uv']
 vars = [vars[0]]
@@ -13,19 +13,18 @@ need_wind = [False]
 gated = [False, True]
 gated = [gated[0]]
 
-start_time = ['2019-01-01','1993-01-01']
+start_time = ['2020-01-01','1993-01-01']
 start_time = [start_time[1]]
 
-model_names = ['gsta','predrnn','predformer']
-# model_names = ['predrnn','tau', 'conv4st']
-# model_names = ['gsta','predrnn']
+model_names = ['predrnn','gsta','predformer','tau']
+model_names = ['conv4st']
 # model_names = [model_names[0]]
 
 pinn_lambdas= [0, 0.7]
 pinn_lambdas = [pinn_lambdas[0]]
 
 loss_ignore_nan = [False, True]
-loss_ignore_nan = [loss_ignore_nan[0]]
+loss_ignore_nan = [loss_ignore_nan[1]]
 
 shuffle = [False, True]
 shuffle = [shuffle[1]]
@@ -48,21 +47,16 @@ for st in start_time:
                                     for s in shuffle:
 
                                         cmd_parts = [
-                                                        "python3 -m tools.trainers",
+                                                        "python -m tools.trainers",
                                                         "--batch_size_train 4",
                                                         f"--model_name {model_name}",
                                                         "--patch_size 8",
-                                                        # "--gradient_clip",
-                                                        # "--gradient_clip_value 1",
-                                                        # "--base /data/hjj/SEJ/data/MY_0.25/processed",
-                                                        # "--input_length 7",
-                                                        # "--output_length 7",
-                                            "--base /data/hjj/SEJ/data/AVISO_0.125deg",
-                                            "--input_length 10",
-                                            "--output_length 10",
-                                            "--height 160",
-                                            "--width 160",
-                                            "--end_time_test 2024-06-14"
+                                                        "--gradient_clip",
+                                                        "--gradient_clip_value 1",
+                                                        "--base D:/Data/sej/AVISO_0.125deg",
+                                                        "--input_length 10",
+                                                        "--output_length 10",
+                                                        "--env windows"
                                                     ]
 
                                         num_runs += 1

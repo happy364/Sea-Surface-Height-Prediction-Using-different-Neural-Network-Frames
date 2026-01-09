@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
+import torch.nn as nn
 import math
 from torch.amp import autocast, GradScaler
 import time
@@ -9,14 +10,21 @@ import gc
 from abc import ABC, abstractmethod
 
 class BaseMethod(ABC):
-    def __init__(self, model,  config, loss_name='', log_dir=None, optimizer=None, scheduler=None, mode='train'):
+    def __init__(self, model,  config, loss_func_train=nn.MSELoss(), log_dir=None, optimizer=None, scheduler=None, mode='train'):
         self.config = config
         self.device = config.device
         self.model_config = config.model_config
         self.model = model
-        self.loss_name = loss_name
+        self.loss_name = loss_func_train.__class__.__name__
         self.scaler = GradScaler()
         self.apply_early_stopping = True
+        self.save_loss_curve = getattr(self.config, 'save_loss_curve', True)
+        self.shuffle = getattr(self.config, 'shuffle', True)
+        print(f"shuffle or not: {self.shuffle}")
+        self.env = getattr(self.config, 'env', 'linux')
+
+        self.train_loss_history = []
+        self.eval_loss_history = []
 
         if mode == 'train':
             self.log_dir = log_dir
@@ -80,12 +88,12 @@ class BaseMethod(ABC):
 
     def _create_dataloader(self, dataset, is_train:bool = True):
         """创建数据加载器 - 可复用"""
-        batch_size = self.batch_size_train if is_train else self.config.batch_size_eval
-        num_workers = min(8, os.cpu_count() // 2)
+        batch_size = self.batch_size_train if is_train else max(2* self.batch_size_train, self.config.batch_size_eval)
+        num_workers = min(8, os.cpu_count() // 2) if self.env == 'linux' else 0
         return DataLoader(
             dataset,
             batch_size=batch_size,
-            shuffle=True if is_train else False,
+            shuffle=self.shuffle if is_train else False, #todo
             pin_memory=True,
             num_workers=num_workers,
         )
@@ -205,6 +213,8 @@ class BaseMethod(ABC):
 
             train_loss = self._train_epoch(train_loader, mask)
             eval_loss = self.test_model(eval_loader, self.mask_true_test if hasattr(self, 'mask_true_test') else None)
+            self.train_loss_history.append(train_loss)
+            self.eval_loss_history.append(eval_loss)
             self._log_metrics(epoch, train_loss, eval_loss)
 
             if self.config.model_name == 'predrnn':
@@ -225,6 +235,8 @@ class BaseMethod(ABC):
         minutes, seconds = divmod(remainder, 60)
         self.logger.info(f"Training completed - Total time: {hours:.0f}h {minutes:.0f}m {seconds:.0f}s")
         self.logger.info(f"Best validation loss: {best_loss:.6f}")
+        self._save_loss_curve()
+
         if test_dataset is not None:
             self.logger.info("Testing model on test dataset...")
             test_dataloader = self._create_dataloader(test_dataset, is_train=False)
@@ -284,6 +296,34 @@ class BaseMethod(ABC):
                 total_loss += loss.item() * batch_size
                 total_samples += batch_size
         return math.sqrt(total_loss / total_samples) if total_samples != 0 else 0.0
+
+    def _save_loss_curve(self):
+        if not self.save_loss_curve:
+            return
+
+        try:
+            import matplotlib.pyplot as plt
+
+            epochs = range(1, len(self.train_loss_history) + 1)
+
+            plt.figure(figsize=(8, 5))
+            plt.plot(epochs, self.train_loss_history, label='Train Loss')
+            plt.plot(epochs, self.eval_loss_history, label='Validation Loss')
+            plt.xlabel('Epoch')
+            plt.ylabel('RMSE')
+            plt.title('Training & Validation Loss')
+            plt.legend()
+            plt.grid(True)
+
+            save_path = os.path.join(self.log_dir, 'loss_curve.png')
+            plt.tight_layout()
+            plt.savefig(save_path, dpi=150)
+            plt.close()
+
+            self.logger.info(f"Loss curve saved to {save_path}")
+
+        except Exception as e:
+            self.logger.warning(f"Failed to save loss curve: {e}")
 
     @abstractmethod
     def _compute_loss(self, train_data, step, mask=None, test=False):

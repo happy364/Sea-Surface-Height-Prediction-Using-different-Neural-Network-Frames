@@ -12,7 +12,7 @@ from models import PredFormer_Model, Mask_PredFormer_Model, SimVP_Model, RNN
 args = get_my_config()
 set_all_seeds(args.SEED)
 
-dataset = MvDataset(args, mode='test')
+dataset = MvDataset(args, mode='test',norm= True)
 dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
 # ----------------------------
 # 输入：
@@ -21,10 +21,10 @@ dataloader = DataLoader(dataset, batch_size=16, shuffle=False)
 # lat: (H,) 每行对应的纬度（单位：度）
 # ----------------------------
 
-land_mask = np.load('/data/hjj/MVPfore/Datas/processed_data/mask.npy')
+land_mask = np.load(args.path_land_mask)
 lat = dataset.lat          # shape (H,)
 
-buffer_km = 20     # 想要海岸多少 km 范围内
+buffer_km = 20    # 想要海岸多少 km 范围内
 
 # ===== Step 1: 计算海/陆距离（像素单位） =====
 dist_to_land = distance_transform_edt(1 - land_mask)   # 对海像素表示距离陆地几像素
@@ -48,11 +48,11 @@ print('coastal_mask shape:', coastal_mask.shape)
 print('coastal_mask sum:', np.sum(coastal_mask))
 
 model = SimVP_Model(**args.model_config).to(args.device)
-model.load_state_dict(torch.load('/data/hjj/MVPfore/model_paras/SimVP_Model_seed42/var_ssh_mask_20251207_0500/model_paras.pkl'))
+model.load_state_dict(torch.load('/data/hjj/SEJ/model_paras_aviso_0.125deg_New/SimVP_Model_seed42/ssh_mask_pinn_0.700_B4_20250915_1049/model_paras.pkl'))
 
-mse_ig_nan = MSELossIgnoreNaNv2(coastal_mask)
+mse_ig_nan = MSELossIgnoreNaNv2(torch.from_numpy(coastal_mask))
 
-trainer = Trainer(model,mse_ig_nan, '', args, None, None,None, mode='test' )
+trainer = Trainer(model,mse_ig_nan, mse_ig_nan, args, None, None,None, mode='test' )
 
 rmse = trainer.test_model(dataloader)
 print(f'RMSE: {rmse}')
