@@ -213,7 +213,8 @@ class BasicConv2d(nn.Module):
         if upsampling is True:
             self.conv = nn.Sequential(*[
                 GatedConv2d(in_channels, out_channels*4, kernel_size=kernel_size,
-                          stride=1, padding=padding, dilation=dilation) if gated else
+                          stride=1, padding=padding, dilation=dilation) \
+                if gated else \
                 nn.Conv2d(in_channels, out_channels*4, kernel_size=kernel_size,
                           stride=1, padding=padding, dilation=dilation),
                 nn.PixelShuffle(2)
@@ -221,7 +222,8 @@ class BasicConv2d(nn.Module):
         else:
             self.conv = GatedConv2d(
                 in_channels, out_channels, kernel_size=kernel_size,
-                stride=stride, padding=padding, dilation=dilation) if gated else \
+                stride=stride, padding=padding, dilation=dilation) \
+                if gated else \
                 nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
                           stride=stride, padding=padding, dilation=dilation)
 

@@ -3,7 +3,7 @@ import os
 mask_predformer = [False, True]
 
 need_mask = [False, True]
-# need_mask = [need_mask[0]]
+need_mask = [need_mask[0]]
 
 vars = ['ssh','uv']
 vars = [vars[0]]
@@ -19,13 +19,13 @@ start_time = [start_time[1]]
 model_names = ['gsta','predrnn','predformer']
 # model_names = ['predrnn','tau', 'conv4st']
 # model_names = ['gsta','predrnn']
-# model_names = [model_names[0]]
-
+# model_names = [model_names[2]]
+model_names = ['conv4st']
 pinn_lambdas= [0, 0.7]
 pinn_lambdas = [pinn_lambdas[0]]
 
 loss_ignore_nan = [False, True]
-loss_ignore_nan = [loss_ignore_nan[0]]
+loss_ignore_nan = [loss_ignore_nan[1]]
 
 shuffle = [False, True]
 shuffle = [shuffle[1]]
@@ -52,8 +52,8 @@ for st in start_time:
                                                         "--batch_size_train 4",
                                                         f"--model_name {model_name}",
                                                         "--patch_size 8",
-                                                        # "--gradient_clip",
-                                                        # "--gradient_clip_value 1",
+                                                        "--gradient_clip",
+                                                        "--gradient_clip_value 1",
                                                         # "--base /data/hjj/SEJ/data/MY_0.25/processed",
                                                         # "--input_length 7",
                                                         # "--output_length 7",

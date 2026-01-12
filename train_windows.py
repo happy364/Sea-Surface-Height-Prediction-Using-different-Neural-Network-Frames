@@ -17,7 +17,7 @@ start_time = ['2020-01-01','1993-01-01']
 start_time = [start_time[1]]
 
 model_names = ['predrnn','gsta','predformer','tau']
-model_names = ['conv4st']
+model_names = ['tau']
 # model_names = [model_names[0]]
 
 pinn_lambdas= [0, 0.7]

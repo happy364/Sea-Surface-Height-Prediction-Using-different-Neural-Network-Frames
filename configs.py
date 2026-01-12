@@ -117,16 +117,16 @@ def get_simvp_tau_config(args):
     simvp_gsta_config = {
         "in_shape": [args.input_length, args.input_channels, args.height, args.width],
         "C_out": args.output_channels,
-        "hid_S": 8,
+        "hid_S": 16,
         "hid_T": 128,
-        "N_S": 6,
-        "N_T": 6,
+        "N_S": 2,
+        "N_T": 4,
         "model_type": 'tau',
         "drop": 0.3,
         "drop_path": 0.3,
         "spatio_kernel_enc": 3,
         "spatio_kernel_dec": 3,
-        "mlp_ratio": 4.0,
+        "mlp_ratio": 8.0,
         "gated": args.gated
     }
     return simvp_gsta_config
@@ -184,7 +184,7 @@ def get_conv4st(args):
         'out_channels': args.output_channels,
         'in_length': args.input_length,
         'out_length': args.output_length,
-        'hid_s': 16,
+        'hid_s': 4,
         'hid_m': 128,
         'n_s': 2,
         'n_t': 8,
