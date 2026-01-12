@@ -18,7 +18,8 @@ class Conv4ST(nn.Module):
         #                             #Conv(scale_t*self.total_length, self.total_length, kernel_size=3, stride=1),
         #                             nn.Conv2d(scale_t*self.total_length, out_length, kernel_size=3, stride=1, padding=1))
         self.temporal_dec = TemporalEncoderModule(in_length, out_length, out_channels, dropout=dropout, is_first=False, scale_t=scale_t)
-        self.output = nn.Conv2d(out_length*out_channels, out_length*out_channels,kernel_size=3, stride=1, padding=1)
+        self.output = nn.Sequential(nn.Conv2d(out_length*out_channels, out_length*out_channels,kernel_size=3, stride=1, padding=1),
+                                    Conv(out_length*out_channels, out_length*out_channels, kernel_size=1, stride=1,))
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -137,7 +138,8 @@ class Conv(nn.Module):
         if norm:
             self.norm1 = nn.InstanceNorm2d(in_channels, affine=True)
             self.norm2 = nn.InstanceNorm2d(out_channels, affine=True)
-        self.act = nn.GELU()
+        # self.act = nn.GELU()
+        self.act = nn.PReLU()
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1,padding=0)
         self.is_first = is_first
         self.dropout = nn.Dropout2d(dropout)
@@ -186,7 +188,8 @@ class BasicConv2d(nn.Module):
             self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
                           stride=stride, padding=padding, dilation=dilation)
 
-        self.act = nn.SiLU(True)
+        # self.act = nn.SiLU(True)
+        self.act = nn.PReLU()
 
     def forward(self, x):
         y = self.conv(x)
