@@ -5,21 +5,21 @@ from timm.models.layers import DropPath, trunc_normal_
 
 
 class Conv4ST(nn.Module):
-    def __init__(self, in_channels=1, out_channels=1, in_length=10, out_length=10, hid_s=8, hid_m=256, n_s=4, n_t=8, dropout=0.3, scale_t=8):
+    def __init__(self, in_channels=1, out_channels=1, in_length=10, out_length=10, hid_s=8,  n_s=4, n_t=8, dropout=0.3, scale_t=8):
         super().__init__()
-        self.spatial_enc =  SpatialEncoder(in_channels, hid_s, n_s)
+        self.spatial_enc =  SpatialEncoder(out_channels, hid_s, n_s)
         self.hid = hid_s * 2**n_s
         self.temporal_enc = TemporalEncoder(in_length, out_length, self.hid, n_t, dropout=dropout, scale_t=scale_t)
         self.spatial_dec = SpatialDecoder(self.hid, out_channels, n_s)
-        self.raw_proj = Conv(in_channels*in_length, out_channels*out_length, kernel_size=3, stride=1,  is_first=True, norm=False)
 
         self.total_length = in_length + out_length
-        # self.output = nn.Sequential(Conv(self.total_length, scale_t*self.total_length, kernel_size=3, stride=1, dropout=dropout),
-        #                             #Conv(scale_t*self.total_length, self.total_length, kernel_size=3, stride=1),
-        #                             nn.Conv2d(scale_t*self.total_length, out_length, kernel_size=3, stride=1, padding=1))
-        self.temporal_dec = TemporalEncoderModule(in_length, out_length, out_channels, dropout=dropout, is_first=False, scale_t=scale_t)
-        self.output = nn.Sequential(nn.Conv2d(out_length*out_channels, out_length*out_channels,kernel_size=3, stride=1, padding=1),
-                                    Conv(out_length*out_channels, out_length*out_channels, kernel_size=1, stride=1,))
+       
+        self.temporal_dec = nn.Sequential(nn.GroupNorm(1,self.total_length),
+                                          nn.Conv2d(self.total_length, self.total_length*scale_t, kernel_size=3, stride=1, padding=1),
+                                          nn.GroupNorm(1,self.total_length*scale_t),nn.PReLU(),
+                                          nn.Conv2d(self.total_length*scale_t, out_length, kernel_size=3, stride=1, padding=1),
+                                          )
+
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
@@ -30,31 +30,34 @@ class Conv4ST(nn.Module):
     def forward(self, x):
         # x: [B, T_in, C, H, W]
         B, T_in, C, H, W = x.shape
-        x = rearrange(x, 'b t c h w -> b (t c) h w')
 
-        raw = self.raw_proj(x)
-        raw = rearrange(raw, 'b (t c) h w -> (b c) t h w', t=self.total_length-T_in)
+        raw =  x.clone()
+        raw = rearrange(raw, 'b t c h w -> (b c) t h w')
 
-        x = rearrange(x, 'b (t c) h w -> (b t) c h w', t=T_in)
+        x = rearrange(x, 'b t c h w -> (b t) c h w', t=T_in)
 
         x = self.spatial_enc(x) # [B*T_in, hid=hid_s*2^n_s, h=H//2^n_s, w=W//2^n_s]
+
+        x = rearrange(x, '(b t) c h w -> (b c) t h w', t=T_in)  # [B*hid, T_in, h, w]
+
         x = self.temporal_enc(x) # [B*hid, T_out , h, w]
 
         x = rearrange(x, '(b c) t h w -> (b t) c h w', b=B)
 
         x = self.spatial_dec(x) # [B*T_out, out_channels, H, W]
 
+        # x = rearrange(x, '(b t) c h w -> (b c) t h w', b=B)
         x = rearrange(x, '(b t) c h w -> (b c) t h w', b=B)
 
-        x = self.temporal_dec(x, raw)
-        x = rearrange(x, '(b c) t h w -> b (c t) h w', b=B, t=self.total_length-T_in)
-        x = self.output(x)
-        x = rearrange(x, 'b (c t) h w -> b t c h w', t=self.total_length-T_in)
+        # x = self.temporal_dec(x+raw)
+        x = torch.cat([x,raw], dim=1)
+        x = self.temporal_dec(x)
+        x = rearrange(x, '(b c) t h w -> b t c h w', b=B, t=self.total_length-T_in)
 
         return x
 
 def sampling_generator(N, reverse=False):
-    samplings = [False, True] * (N)
+    samplings = [False, True] * N
     if reverse: return list(reversed(samplings))
     else: return samplings
 
@@ -64,8 +67,8 @@ class SpatialEncoder(nn.Module):
         super().__init__()
         f = lambda i: 2**(i//2) if i//2 != 0 else 1
         self.enc = nn.Sequential(
-            ConvSC(in_channels, hid_s, 3, downsampling=samplings[0], ),
-            *[ConvSC(hid_s * f(i+1) , hid_s * f(i+2), 3, downsampling=s,)
+            ConvBlock(in_channels, hid_s, 3, downsampling=samplings[0], ),
+            *[ConvBlock(hid_s * f(i+1) , hid_s * f(i+2), 3, downsampling=s,)
               for i, s in enumerate(samplings[1:])]
         )
 
@@ -79,13 +82,10 @@ class SpatialDecoder(nn.Module):
     def __init__(self, hid, out_channels,n_s):
         super().__init__()
         self.upsampling = nn.Sequential(nn.Conv2d(hid, out_channels*4**n_s, 1),nn.PixelShuffle(2**n_s))
-        self.output = Conv(out_channels, out_channels, kernel_size=1+2*n_s, stride=1)
 
     def forward(self, x):
         x = self.upsampling(x)
-        x = self.output(x)
         return x
-
 
 
 class TemporalEncoder(nn.Module):
@@ -93,16 +93,15 @@ class TemporalEncoder(nn.Module):
         super().__init__()
         self.in_length = in_length
         self.temporal_encoder_modules = nn.ModuleList(
-            [TemporalEncoderModule(in_length, out_length, hid,  dropout=dropout, is_first= i==0,
+            [TemporalModule(in_length, out_length, hid,  dropout=dropout, is_first= i==0,
                                    kernel_size=kernel_size, dilation=1, scale_t=scale_t) for i in range(n_t)])
     def forward(self, x):
-        x = rearrange(x, '(b t) c h w -> (b c) t h w', t=self.in_length)  # [B*c, T_in, h, w]
         latent = x.clone()
         for module in self.temporal_encoder_modules:
             x = module(x, latent)
         return x
 
-class TemporalEncoderModule(nn.Module):
+class TemporalModule(nn.Module):
     def __init__(self, in_length, out_length, hid,  kernel_size=3, dilation=1, dropout=0.,is_first=False, scale_t=8):
         super().__init__()
         self.total_length = in_length + out_length
@@ -111,12 +110,13 @@ class TemporalEncoderModule(nn.Module):
             self.temporal_embedding = Conv(in_length, out_length)
         self.temporal_proj = nn.Sequential(
             Conv(self.total_length, scale_t*self.total_length, kernel_size=kernel_size,dilation=dilation,dropout=dropout),
-            Conv(scale_t*self.total_length, out_length, kernel_size=kernel_size,dilation=dilation))
+            nn.Conv2d(scale_t*self.total_length, out_length, kernel_size=3, stride=1, padding=1))
         self.mixing = nn.Sequential(
             Conv(hid, scale_t*hid, dropout=dropout),
-            Conv(scale_t*hid, hid))
+            nn.Conv2d(scale_t*hid, hid, kernel_size=3, stride=1, padding=1))
         self.hid = hid
         self.out_length = out_length
+
     def forward(self, x, latent):
         if self.is_first:
             x = self.temporal_embedding(x)  # [B*c, T_out, h, w]
@@ -128,7 +128,7 @@ class TemporalEncoderModule(nn.Module):
         return x
 
 class Conv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1,  dilation=1, is_first=False, dropout=0., norm=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1,  dilation=1,  dropout=0., norm=True, group=1):
         super().__init__()
         self.proj = in_channels != out_channels
         if self.proj:
@@ -136,12 +136,12 @@ class Conv(nn.Module):
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding=dilation * (kernel_size - 1) // 2, dilation=dilation)
         self.norm = norm
         if norm:
-            self.norm1 = nn.InstanceNorm2d(in_channels, affine=True)
-            self.norm2 = nn.InstanceNorm2d(out_channels, affine=True)
+            self.norm1 = nn.GroupNorm(group,out_channels)
+            self.norm2 = nn.GroupNorm(group,out_channels)
         # self.act = nn.GELU()
-        self.act = nn.PReLU()
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=1, stride=1,padding=0)
-        self.is_first = is_first
+        self.act1 = nn.PReLU()
+        self.act2 = nn.PReLU()
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size, stride, padding=dilation * (kernel_size - 1) // 2, dilation=dilation)
         self.dropout = nn.Dropout2d(dropout)
 
     def forward(self, x):
@@ -149,75 +149,54 @@ class Conv(nn.Module):
             skip = self.proj(x)
         else:
             skip = x.clone()
-        if not self.is_first:
-            if self.norm:
-                x = self.norm1(x)
-            x = self.act(x)
         x = self.conv(x)
         if self.norm:
-            x = self.norm2(x)
-        x = self.act(x)
+            x = self.norm1(x)
+        x = self.act1(x)
         if self.dropout.p > 0:
             x = self.dropout(x)
         x = self.conv2(x)
+        if self.norm:
+            x = self.norm2(x)
+        x = self.act2(x)
         x = x + skip
         return x
 
 
-class BasicConv2d(nn.Module):
 
+
+class ConvBlock(nn.Module):
     def __init__(self,
                  in_channels,
                  out_channels,
                  kernel_size=3,
-                 stride=1,
-                 padding=1,
-                 dilation=1,
-                 upsampling=False,
-                 act_norm=False,
-                 ):
-        super().__init__()
-        self.act_norm = act_norm
-        if upsampling is True:
-            self.conv = nn.Sequential(*[
-                nn.Conv2d(in_channels, out_channels*4, kernel_size=kernel_size,
-                          stride=1, padding=padding, dilation=dilation),
-                nn.PixelShuffle(2)
-            ])
-        else:
-            self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
-                          stride=stride, padding=padding, dilation=dilation)
-
-        # self.act = nn.SiLU(True)
-        self.act = nn.PReLU()
-
-    def forward(self, x):
-        y = self.conv(x)
-        if self.act_norm:
-            y = self.act(y)
-        return y
-
-
-class ConvSC(nn.Module):
-
-    def __init__(self,
-                 C_in,
-                 C_out,
-                 kernel_size=3,
                  downsampling=False,
                  upsampling=False,
-                 act_norm=True,
-                 ):  #todo： act_norm
+                 act_norm=True):
         super().__init__()
 
-        stride = 2 if downsampling is True else 1
+        stride = 2 if downsampling else 1
+
         padding = (kernel_size - stride + 1) // 2
 
-        self.conv = BasicConv2d(C_in, C_out, kernel_size=kernel_size, stride=stride,
-                                upsampling=upsampling, padding=padding, act_norm=act_norm)
+        if upsampling:
+            self.conv = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels * 4, kernel_size=kernel_size,
+                          stride=1, padding=padding),
+                nn.PixelShuffle(2)
+            )
+        else:
+            self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
+                                  stride=stride, padding=padding)
+
+        self.act = nn.PReLU()
+        self.norm = nn.BatchNorm2d(out_channels)
+        self.act_norm = act_norm
 
     def forward(self, x):
         x = self.conv(x)
+        if self.act_norm:
+            x = self.act(self.norm(x))
         return x
 
 if __name__ == '__main__':
