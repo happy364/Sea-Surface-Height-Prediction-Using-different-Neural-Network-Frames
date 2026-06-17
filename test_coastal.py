@@ -50,7 +50,7 @@ print('coastal_mask sum:', np.sum(coastal_mask))
 model = SimVP_Model(**args.model_config).to(args.device)
 model.load_state_dict(torch.load('/data/hjj/SEJ/model_paras_aviso_0.125deg_New/SimVP_Model_seed42/ssh_mask_pinn_0.700_B4_20250915_1049/model_paras.pkl'))
 
-mse_ig_nan = MSELossIgnoreNaNv2(torch.from_numpy(coastal_mask))
+mse_ig_nan = MSELossIgnoreNaNv2(torch.from_numpy(coastal_mask), args)
 
 trainer = Trainer(model,mse_ig_nan, mse_ig_nan, args, None, None,None, mode='test' )
 

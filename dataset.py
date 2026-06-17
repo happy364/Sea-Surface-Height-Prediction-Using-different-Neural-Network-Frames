@@ -4,30 +4,30 @@ from torch.utils.data import Dataset
 import xarray as xr
 
 class MvDataset(Dataset):
-    def __init__(self, args, mode='train', norm=False):
+    def __init__(self, args, mode='train', norm=False, ):
         self.args = args
         self.data = xr.open_mfdataset(self.args.datapath, combine='nested', concat_dim='time')
 
         if mode == 'train':
             time_span = slice(args.start_time_train, args.end_time_train)
-            # data_path = args.base / f"train.nc"
         elif mode == 'eval':
             time_span = slice(args.start_time_val, args.end_time_val)
-            # data_path = args.base / f"val.nc"
         elif mode == 'test':
             time_span = slice(args.start_time_test, args.end_time_test)
-            # data_path = args.base / f"test.nc"
+        elif mode == 'all':
+            time_span = slice(args.start_time_train, args.end_time_test)
         else:
             raise ValueError('mode must be train, eval or test')
 
         self.data = self.data.sel(time=time_span)
-        # self.data = xr.open_dataset(data_path)
         self.lat = self.data.latitude.values
         self.lon = self.data.longitude.values
+        self.dates = self.data.time.values
 
         self.field = None
 
         if args.need_ssh:
+
             self.adt = np.expand_dims(self.data.adt.values.astype(np.float32), axis=1)
             if self.field is None:
                 self.field = self.adt
@@ -79,7 +79,7 @@ class MvDataset(Dataset):
         self.field = np.nan_to_num(self.field)
 
         self.output_length = args.output_length
-        if args.model_name == 'predrnn':
+        if args.patched:
             p = self.args.model_config['patch_size']
             T = self.field.shape[0]
             C = self.field.shape[1]
@@ -92,30 +92,40 @@ class MvDataset(Dataset):
             self.field = self.field.reshape(T, C * p * p, H // p, W // p)
 
         self.field = torch.from_numpy(self.field)
+        print(f"field shape: {self.field.shape}")
 
 
     def __len__(self):
         return len(self.data.time)-self.input_length-self.output_length+1
+    @property
+    def start_dates(self):
+        """返回每一个可用的数据样本对应的第一个时间点"""
+        return self.dates[:len(self)]
 
     def __getitem__(self, idx):
-        if self.args.model_name == 'predrnn':
+        if self.args.one_seq:
             data = self.field[idx:idx+self.input_length+self.output_length]
             return data
         else:
             datax = self.field[idx:idx+self.input_length]
-
-            datay = self.field[idx+self.input_length:idx+self.input_length+self.output_length, :self.args.output_channels]
-
+            if not self.args.evaluate_wind:
+                datay = self.field[idx+self.input_length:idx+self.input_length+self.output_length, :self.args.output_channels]
+            else:
+                datay = self.field[idx+self.input_length:idx+self.input_length+self.output_length, :self.args.output_channels+2]
             return datax, datay
 
+
 if __name__ == '__main__':
-    from configs import parse_args
+    from configs import parse_args, get_my_config
     args = parse_args()
+    args.env = 'windows'
+    args.base =  r'D:/Data/sej/AVISO_0.125deg'
+    args.need_ssh = True
+    args = get_my_config(args)
     dataset = MvDataset(args, mode='test')
     print(len(dataset))
     print(dataset[0][0].shape)
-    print(dataset[0][1].shape)
-
+    print(dataset.start_dates)
 
 
 

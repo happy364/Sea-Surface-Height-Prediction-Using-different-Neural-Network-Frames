@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mytools import MSELossIgnoreNaNv2,convert_configs
+from mytools import convert_configs
 
 
 class GatedConv2d(nn.Module):
@@ -135,7 +135,7 @@ class RNN(nn.Module):
         adapter_num_hidden = self.num_hidden[0]
         self.adapter = nn.Conv2d(adapter_num_hidden, adapter_num_hidden, 1, stride=1, padding=0, bias=False)
 
-    def forward(self, frames, mask_true, loss_func=nn.MSELoss()):
+    def forward(self, frames, mask_true=None, loss_func=nn.MSELoss()):
         # [batch, length, height, width, channel] -> [batch, length, channel, height, width]
         # frames = frames_tensor.permute(0, 1, 4, 2, 3).contiguous()
         # mask_true = mask_true.permute(0, 1, 4, 2, 3).contiguous()
@@ -163,12 +163,15 @@ class RNN(nn.Module):
 
         for t in range(self.configs.total_length - 1):
             time_schedule = 1 if self.configs.reverse_schedule else self.configs.input_length
-            true_frames = frames[:, t, :self.output_frame_channel]
+            true_frames = frames[:, t, :self.output_frame_channel] # todo: 2026.1.13, find that the output channel must be equal to the input channel,except the need_mask=True
             if t < time_schedule:
                 net = true_frames
             else:
-                net = mask_true[t - time_schedule].unsqueeze(0).expand_as(true_frames) * true_frames + \
-                          (1 - mask_true[t - time_schedule].unsqueeze(0).expand_as(true_frames)) *  x_gen
+                if mask_true is None:
+                    net = true_frames if t < self.configs.input_length else x_gen
+                else:
+                    net = mask_true[t - time_schedule].unsqueeze(0).expand_as(true_frames) * true_frames + \
+                              (1 - mask_true[t - time_schedule].unsqueeze(0).expand_as(true_frames)) *  x_gen
 
             if self.configs.need_mask:
                 mask_land = frames[:, t,

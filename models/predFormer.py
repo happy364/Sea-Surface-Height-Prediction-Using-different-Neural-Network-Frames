@@ -138,24 +138,24 @@ class PredFormer_Model(nn.Module):
         assert self.image_height % self.patch_size == 0, 'Image height must be divisible by the patch size.'
         assert self.image_width % self.patch_size == 0, 'Image width must be divisible by the patch size.'
         self.patch_dim = self.input_channels * self.patch_size ** 2
-        # self.to_patch_embedding = nn.Sequential(
-        #     # 调整维度顺序以适应Conv3d
-        #     Rearrange('b t c h w -> b c t h w'),
-        #     # 3D卷积提取patch
-        #     nn.Conv3d(
-        #         in_channels=self.input_channels,
-        #         out_channels=self.dim,
-        #         kernel_size=(1, self.patch_size, self.patch_size),
-        #         stride=(1, self.patch_size, self.patch_size)
-        #     ),
-        #     # 调整回目标形状
-        #     Rearrange('b d t h w -> b t (h w) d')
-        # ) #todo: conv3d or linear?
-
         self.to_patch_embedding = nn.Sequential(
-            Rearrange('b t c (h p1) (w p2) -> b t (h w) (p1 p2 c)', p1=self.patch_size, p2=self.patch_size),
-            nn.Linear(self.patch_dim, self.dim),
-        )
+            # 调整维度顺序以适应Conv3d
+            Rearrange('b t c h w -> b c t h w'),
+            # 3D卷积提取patch
+            nn.Conv3d(
+                in_channels=self.input_channels,
+                out_channels=self.dim,
+                kernel_size=(1, self.patch_size, self.patch_size),
+                stride=(1, self.patch_size, self.patch_size)
+            ),
+            # 调整回目标形状
+            Rearrange('b d t h w -> b t (h w) d')
+        ) #todo: conv3d or linear?
+
+        # self.to_patch_embedding = nn.Sequential(
+        #     Rearrange('b t c (h p1) (w p2) -> b t (h w) (p1 p2 c)', p1=self.patch_size, p2=self.patch_size),
+        #     nn.Linear(self.patch_dim, self.dim),
+        # )
 
         self.pos_embedding = nn.Parameter(sinusoidal_embedding(self.num_frames_in * self.num_patches, self.dim),
                                           requires_grad=False).view(1, self.num_frames_in, self.num_patches, self.dim)

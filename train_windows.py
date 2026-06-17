@@ -8,7 +8,8 @@ need_mask = [need_mask[0]]
 vars = ['ssh','uv']
 vars = [vars[0]]
 
-need_wind = [False]
+need_wind = [False,True]
+need_wind = [need_wind[0]]
 
 gated = [False, True]
 gated = [gated[0]]
@@ -16,9 +17,8 @@ gated = [gated[0]]
 start_time = ['2020-01-01','1993-01-01']
 start_time = [start_time[1]]
 
-model_names = ['predrnn','gsta','predformer','tau']
-model_names = ['tau']
-# model_names = [model_names[0]]
+model_names = ['gsta','predformer','predrnn','tau']
+model_names = model_names[3:]
 
 pinn_lambdas= [0, 0.7]
 pinn_lambdas = [pinn_lambdas[0]]
@@ -53,10 +53,13 @@ for st in start_time:
                                                         "--patch_size 8",
                                                         "--gradient_clip",
                                                         "--gradient_clip_value 1",
-                                                        "--base D:/Data/sej/AVISO_0.125deg",
+
                                                         "--input_length 10",
                                                         "--output_length 10",
-                                                        "--env windows"
+                                                        "--area indian",
+                                                        "--env windows",
+                                                        "--norm",
+                                            "--SEED 1"
                                                     ]
 
                                         num_runs += 1

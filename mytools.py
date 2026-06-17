@@ -6,9 +6,8 @@ from torch.amp import autocast
 import random
 import os
 import math
-from configs import get_my_config
+from configs import get_my_config, parse_args
 
-config = get_my_config()
 class ConfigObject:
     """将字典转换为对象的包装类"""
     def __init__(self, config_dict):
@@ -67,89 +66,34 @@ def unpatchify_with_batch(patched_tensor, patch_size, original_channels):
 
     return x
 
-def masked_pearson_corrcoef(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    """
-    计算 pred 和 target 之间的整体 Pearson 相关系数，忽略 target 中为 NaN 的位置。
-
-    参数:
-        pred (torch.Tensor): 预测值张量，形状为 [M, N]
-        target (torch.Tensor): 目标张量，形状为 [M, N]
-
-    返回:
-        torch.Tensor: 一个标量，表示整体相关系数
-    """
-    if pred.shape != target.shape:
-        raise ValueError("pred and target must have the same shape")
-
-    # Flatten
-    pred_flat = pred.view(-1)
-    target_flat = target.view(-1)
-
-    # 掩膜：忽略 target 中为 NaN 的位置
-    mask = ~torch.isnan(target_flat)
-    pred_masked = pred_flat[mask]
-    target_masked = target_flat[mask]
-
-    if pred_masked.numel() == 0:
-        return torch.tensor(float('nan'))  # 如果有效点为 0，则返回 NaN
-
-    # 计算 Pearson 相关
-    pred_mean = pred_masked.mean()
-    target_mean = target_masked.mean()
-
-    pred_centered = pred_masked - pred_mean
-    target_centered = target_masked - target_mean
-
-    numerator = torch.sum(pred_centered * target_centered)
-    denominator = torch.sqrt(torch.sum(pred_centered ** 2) * torch.sum(target_centered ** 2))
-
-    epsilon = 1e-8  # 防止除以0
-    corr = numerator / (denominator + epsilon)
-    return corr
-
 
 class MSELossIgnoreNaN(nn.Module):
-    def __init__(self):
-        super(MSELossIgnoreNaN, self).__init__()
-        self.mse_func = nn.MSELoss(reduction="sum")
-
-    def forward(self, pred, target):
-
-        valid_mask = ~(torch.isnan(target) | torch.isinf(target))
-        valid_count = valid_mask.sum()
-        if valid_count == 0:
-            return torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
-        target = torch.where(valid_mask, target, pred)
-        loss = self.mse_func(pred, target) / valid_count
-
-        return loss
-
-class MSELossIgnoreNaNv2(nn.Module):
-    def __init__(self, mask_valid, model_configs=None, config=config,  patched=False):
+    def __init__(self, config, mask_valid: torch.Tensor=None, patched=False):
         """
         :param mask_valid: valid: True, invalid: False
-        :param rnn2configs: model config
         :param patched: if the pred and target are patched
         """
         super().__init__()
-        self.model_configs = convert_configs(model_configs)
         self.mse_func = nn.MSELoss(reduction="sum")
-        self.mask_valid = mask_valid
-        H, W = self.mask_valid.shape
-        C = config.output_channels
-        self.mask_valid = self.mask_valid[None,None,None,:,:].to(device=config.device)
 
-        if patched:
-            p = self.model_configs.patch_size
-            self.mask_valid = self.mask_valid.expand(1,1,C,H,W)
-            print(f"after 1: {self.mask_valid.shape}")
-            self.mask_valid = self.mask_valid.reshape(C, H // p, p, W // p, p)
-            print(f"after 2: {self.mask_valid.shape}")
-            self.mask_valid = self.mask_valid.permute(0,2,4,1,3).reshape(1,1,C * p * p, H // p, W // p)
-            print(f"after 3: {self.mask_valid.shape}")
+        if mask_valid is not None:
+            self.mask_valid = mask_valid[None,None,None,:,:].to(device=config.device)
+            H, W = mask_valid.shape
+            print(f"mask_valid: {self.mask_valid.shape}")
+            if patched:
+                C = config.output_channels
+                p = config.patch_size
+                self.mask_valid = self.mask_valid.expand(1, 1, C, H, W)
+                self.mask_valid = self.mask_valid.reshape(C, H // p, p, W // p, p)
+                self.mask_valid = self.mask_valid.permute(0, 2, 4, 1, 3).reshape(1, 1, C * p * p, H // p, W // p)
+                print(f"after patched: {self.mask_valid.shape}")
 
     def forward(self, pred, target):
-        mask_valid = self.mask_valid.expand_as(pred)
+        if hasattr(self, "mask_valid"):
+            mask_valid = self.mask_valid.expand_as(pred)
+        else:
+            mask_valid = ~(torch.isnan(target) | torch.isinf(target))
+
         valid_count = mask_valid.sum()
         if valid_count == 0:
             return torch.tensor(0.0, device=pred.device, dtype=pred.dtype)
@@ -158,6 +102,192 @@ class MSELossIgnoreNaNv2(nn.Module):
 
         return loss
 
+class MaskPearsonCorr(nn.Module):
+    def __init__(self, mask_valid: torch.Tensor = None):
+        """
+        :param mask_valid: valid: True, invalid: False
+        """
+        super().__init__()
+        self.mask_valid = mask_valid
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor, return_pvalue: bool = False):
+        """
+        计算 pred 和 target 之间的整体 Pearson 相关系数，忽略 target 中为 NaN 的位置。
+
+        参数:
+            pred (torch.Tensor): 预测值张量，形状为 [M, N]
+            target (torch.Tensor): 目标张量，形状为 [M, N]
+            return_pvalue (bool): 是否同时返回 p 值
+
+        返回:
+            corr (torch.Tensor): 标量相关系数
+            [可选] p_value (torch.Tensor): 标量 p 值
+        """
+        if pred.shape != target.shape:
+            raise ValueError("pred and target must have the same shape")
+
+        # Flatten
+        pred_flat = pred.view(-1)
+        target_flat = target.view(-1)
+
+        # 掩膜：忽略 target 中为 NaN 的位置
+        if self.mask_valid is not None:
+            mask = self.mask_valid.view(-1)
+        else:
+            mask = ~torch.isnan(target_flat)
+
+        pred_masked = pred_flat[mask]
+        target_masked = target_flat[mask]
+
+        n = pred_masked.numel()
+        if n == 0:
+            nan_tensor = torch.tensor(float('nan'), device=pred.device)
+            return (nan_tensor, nan_tensor) if return_pvalue else nan_tensor
+
+        # 计算 Pearson 相关
+        pred_mean = pred_masked.mean()
+        target_mean = target_masked.mean()
+
+        pred_centered = pred_masked - pred_mean
+        target_centered = target_masked - target_mean
+
+        numerator = torch.sum(pred_centered * target_centered)
+        denominator = torch.sqrt(torch.sum(pred_centered ** 2) * torch.sum(target_centered ** 2))
+
+        epsilon = 1e-8  # 防止除以0
+        corr = numerator / (denominator + epsilon)
+
+        # 截断到 [-1, 1] 避免数值精度引起的轻微越界
+        corr = torch.clamp(corr, -1.0, 1.0)
+
+        if not return_pvalue:
+            return corr
+
+        if n < 3:
+            return corr, torch.tensor(float('nan'), device=pred.device)
+
+        # 计算 P 值: t 统计量。
+        # 由于物理/图像数据有效点通常极大 (n > 30)，t 分布极其逼近标准正态分布
+        t_stat = corr * torch.sqrt((n - 2) / (1 - corr ** 2 + epsilon))
+        # 使用误差函数 (erf) 高效计算正态分布的双侧 P 值
+        p_value = 2 * (1 - 0.5 * (1 + torch.erf(torch.abs(t_stat) / math.sqrt(2))))
+
+        return corr, p_value
+
+
+class MaskPearsonCorrNP:
+    def __init__(self, mask_valid: np.ndarray = None):
+        """
+        :param mask_valid: valid: True, invalid: False
+        """
+        self.mask_valid = mask_valid
+
+    def __call__(self, pred: np.ndarray, target: np.ndarray, return_pvalue: bool = False):
+        """
+        计算 pred 和 target 之间的整体 Pearson 相关系数，忽略 target 中为 NaN 的位置。
+
+        参数:
+            pred (np.ndarray): [M, N]
+            target (np.ndarray): [M, N]
+            return_pvalue (bool): 是否返回 p 值
+
+        返回:
+            corr: float
+            [可选] p_value: float
+        """
+        if pred.shape != target.shape:
+            raise ValueError("pred and target must have the same shape")
+
+        # flatten
+        pred_flat = pred.reshape(-1)
+        target_flat = target.reshape(-1)
+
+        # mask
+        if self.mask_valid is not None:
+            mask = self.mask_valid.reshape(-1)
+        else:
+            mask = ~np.isnan(target_flat)
+
+        pred_masked = pred_flat[mask]
+        target_masked = target_flat[mask]
+
+        n = pred_masked.size
+        if n == 0:
+            if return_pvalue:
+                return np.nan, np.nan
+            return np.nan
+
+        # mean
+        pred_mean = pred_masked.mean()
+        target_mean = target_masked.mean()
+
+        # center
+        pred_centered = pred_masked - pred_mean
+        target_centered = target_masked - target_mean
+
+        numerator = np.sum(pred_centered * target_centered)
+        denominator = np.sqrt(
+            np.sum(pred_centered ** 2) * np.sum(target_centered ** 2)
+        )
+
+        epsilon = 1e-8
+        corr = numerator / (denominator + epsilon)
+
+        # clamp
+        corr = np.clip(corr, -1.0, 1.0)
+
+        if not return_pvalue:
+            return corr
+
+        if n < 3:
+            return corr, np.nan
+
+        # t-stat
+        t_stat = corr * np.sqrt((n - 2) / (1 - corr ** 2 + epsilon))
+
+        # 使用 erf 近似正态分布
+        p_value = 2 * (1 - 0.5 * (1 + math.erf(abs(t_stat) / math.sqrt(2))))
+
+        return corr, p_value
+
+def compute_gradients_exact(sla, lon, lat, R_E=6371000.0, is_real_gradient=True):
+    """
+    使用中心差分 (torch.gradient) 计算高精度物理梯度，比 Sobel 算子更符合物理场真实特征。
+    输入 sla 尺寸为 [B, T, C, H, W]
+    返回:
+      grad_x_phys, grad_y_phys: 分别为沿 x (经度) 和 y (纬度) 方向的梯度
+    """
+    if lon.ndim == 2 and np.all(lon == lon[0, :][None, :]) and np.all(lat == lat[:, 0][:, None]):
+        lon = lon[0, :]
+        lat = lat[:, 0]
+
+    B, T, C, H, W = sla.shape
+
+    # dim=-1 是 W (经度 x), dim=-2 是 H (纬度 y)
+    # torch.gradient 默认计算中心差分： (f(i+1) - f(i-1)) / 2
+    grad_y = torch.gradient(sla, dim=-2)[0]
+    grad_x = torch.gradient(sla, dim=-1)[0]
+
+    if is_real_gradient:
+        # 纬度间隔 (恒定)
+        delta_lat = lat[1] - lat[0]
+        dy = delta_lat * (np.pi / 180.0) * R_E
+
+        # 经度间隔 (随纬度变化, H个值)
+        delta_lon = lon[1] - lon[0]
+        lat_rad = np.deg2rad(lat)
+        dx_per_row = delta_lon * (np.pi / 180.0) * R_E * np.cos(lat_rad)
+
+        # 转换为 Tensor 并广播到 [1, 1, 1, H, 1] 匹配 sla 的维度
+        dx_tensor = torch.tensor(dx_per_row, dtype=sla.dtype, device=sla.device).view(1, 1, 1, H, 1)
+
+        # 物理距离缩放
+        grad_x_phys = grad_x / dx_tensor
+        grad_y_phys = grad_y / dy
+
+        return grad_x_phys, grad_y_phys
+    else:
+        return grad_x, grad_y
 
 def compute_gradients_sobel(sla, lon, lat, R_E=6371000.0, is_real_gradient=True):
     """
@@ -273,106 +403,14 @@ def compute_geostrophic_current(pred,  lon, lat, if_solid_f=False):
     f, f_weight = compute_f_and_sigmoid_weight(lat, if_solid_f)
     f = f.to(pred.device)
 
-    grad_x, grad_y = compute_gradients_sobel(pred, lon, lat, R_E=6.371e6)
-
+    grad_x, grad_y = compute_gradients_sobel(pred, lon, lat, R_E=6.371e6) #todo
+    # grad_x, grad_y = compute_gradients_exact(pred, lon, lat)
     # 地转流分量
     u_geo = - (g / f) * grad_y
     v_geo = (g / f) * grad_x
 
     return u_geo, v_geo, f_weight
 
-class EvalModel:
-    def __init__(self, model, config):
-        self.mymodel = model
-        self.device = config.device
-        self.loss_var = MSELossIgnoreNaN()
-
-    def test_model(self, dataloader):
-        self.mymodel.eval()
-        mse = []
-        num_samples = 0
-        with torch.no_grad():
-            for inputs, targets in dataloader:
-                with autocast('cuda'):
-                    out_var = self.mymodel(
-                        inputs.float().to(self.device),
-                    )
-                    B = out_var.shape[0]
-                    num_samples += B
-                    mse.append(self.loss_var(out_var, targets.float().to(
-                        self.device)).item() * B)
-        return torch.sqrt(torch.tensor(mse).sum() / num_samples)
-
-class EvalModel_RNN:
-    def __init__(self, model, loss, config, rnn2configs):
-        self.mymodel = model
-        self.device = config.device
-        self.mypara = config
-        self.input_length = rnn2configs["input_length"]
-        self.patch_size = rnn2configs["patch_size"]
-        self.loss_var = loss
-
-    def test_model(self, dataloader, mask_true):
-        self.mymodel.eval()
-        print("begin testing......")
-        mse = 0
-        num_samples = 0
-        with torch.no_grad():
-            for input_var in dataloader:
-                # print("testing...\n")
-                B = input_var.shape[0]
-                if B != self.mypara.batch_size_train:
-                    mask_true_batch = mask_true[:B]
-                else:
-                    mask_true_batch = mask_true
-                num_samples += B
-                with autocast('cuda'):
-                    out_var, loss = self.mymodel(input_var.to(self.device), mask_true_batch)
-                    mse += loss.item() * input_var.shape[0]
-        return math.sqrt(mse / num_samples)
-
-    def test_mask_steps(self, dataloader,mask_true, is_persistence=False):
-        self.mymodel.eval()
-        mse_list = []
-        corr_list = []
-        num_samples = 0
-        with torch.no_grad():
-            for i, inputs in enumerate(dataloader):
-                B = inputs.shape[0]
-                if B != self.mypara.batch_size_train:
-                    mask_true_batch = mask_true[:B]
-                else:
-                    mask_true_batch = mask_true
-                inputs = inputs.float().to(self.device)
-                pred_y,loss = self.mymodel(inputs,mask_true_batch)
-
-                targets = unpatchify_with_batch(inputs, self.patch_size, self.mypara.input_channel)[:,
-                         self.input_length:, 0:self.mypara.output_channel].to(self.device)
-                pred_y = unpatchify_with_batch(pred_y, self.patch_size, self.mypara.output_channel)
-
-                B, T, C, H, W = targets.shape
-
-                if is_persistence:
-                    pred_y = inputs[:, -1].unsqueeze(1).expand(-1, T, -1, -1, -1)
-
-                num_samples += B
-                # print(f"predy : {pred_y.shape}\n target: {targets.shape}")
-
-                for t in range(T):
-                    mse = self.loss_var(pred_y[:, t:t+1], targets[:, t:t+1])
-                    corr = 0
-                    for j in range(B):
-                        corr += masked_pearson_corrcoef(pred_y[j, t, 0], targets[j, t, 0])
-
-                    if len(mse_list) <= t:
-                        mse_list.append(0)
-                        corr_list.append(0)
-                    mse_list[t] += mse * B
-                    corr_list[t] += corr
-
-        rmse_avg = [torch.sqrt(mse_step / num_samples) for mse_step in mse_list]
-        corr_avg = [corr_step / num_samples for corr_step in corr_list]
-        return rmse_avg, corr_avg  # shape = [T]
 
 def reverse_schedule_sampling(itr,  total_length, input_length, img_shape, args, reverse=True, mode='train'):
     """
