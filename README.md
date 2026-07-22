@@ -21,19 +21,19 @@ This repository investigates how different neural network architectures and thei
 <p align="center">
   <img src="figures/simvpv2_architecture.png" width="80%">
   <br>
-  <em>Figure 1. SimVPv2 architecture: Encoder-Translator-Decoder with gSTA blocks.</em>
+  <em>Figure 1. SimVPv2 architecture: Encoder-Translator-Decoder with gSTA blocks (adapted from Tan et al., 2024).</em>
 </p>
 
 <p align="center">
   <img src="figures/predrnnv2_architecture.png" width="80%">
   <br>
-  <em>Figure 2. PredRNNv2 architecture: ST-LSTM with spatiotemporal memory flow.</em>
+  <em>Figure 2. PredRNNv2 architecture: ST-LSTM with spatiotemporal memory flow (adapted from Wang et al., 2023).</em>
 </p>
 
 <p align="center">
   <img src="figures/predformer_architecture.png" width="80%">
   <br>
-  <em>Figure 3. PredFormer architecture: Factorized Temporal-Spatial gated Transformer.</em>
+  <em>Figure 3. PredFormer architecture: Factorized Temporal-Spatial gated Transformer (adapted from Tang et al., 2025).</em>
 </p>
 
 ---
@@ -314,6 +314,14 @@ If this repository is useful for your research, please cite:
   publisher={MDPI}
 }
 ```
+
+---
+
+## References
+
+- **SimVPv2**: Tan C, Gao Z, Li S, et al. "SimVPv2: Towards Simple Yet Powerful Spatiotemporal Predictive Learning", *arXiv*, 2024
+- **PredRNNv2**: Wang Y, Wu H, Zhang J, et al. "PredRNN: A Recurrent Neural Network for Spatiotemporal Predictive Learning", *IEEE TPAMI*, 2023, 45(2): 2208–2225
+- **PredFormer**: Tang Y, Qi L, Xie F, et al. "Video Prediction Transformers Without Recurrence or Convolution", *arXiv*, 2025
 
 ---
 
