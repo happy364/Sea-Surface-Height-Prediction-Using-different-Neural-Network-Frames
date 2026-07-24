@@ -78,6 +78,8 @@ The table below summarizes the RMSE (cm) of all three models under different str
 | PredRNNv2 | 2.03 |  2.15(↑5.9%) | **1.64** (↓19.2%) | 1.91 (↓5.9%) | **1.61** (↓20.7%) |
 | PredFormer | 2.21 |  2.25(↑1.8%) | 2.26 (↑2.3%) | 2.49 (↑12.7%) | 2.76 (↑24.9%) |
 
+> **Note on PredRNNv2 results:** The PR model results reported here differ from those in our prior study (Huang et al., 2025), reflecting two key improvements: (1) hyperparameter tuning was adjusted to maintain parameter scale consistency with SimVPv2 (~3–4M) rather than forcing exact parity, yielding a stronger baseline RMSE; and (2) the geostrophic constraint loss is now computed over all 19 forecast steps (including the autoregressive intermediate states) rather than only the 10 output steps as in the previous work, which better aligns with the model's autoregressive training objective.
+
 ## Key findings:
 
 **Mask input** benefits autoregressive models most — PredRNNv2 RMSE drops from 2.03 to 1.64 cm (↓19.2%) with negligible computational overhead. The two strategies exhibit **strong synergy** on SimVPv2 and PredRNNv2, with the combined approach achieving the best results.
@@ -322,7 +324,7 @@ If this repository is useful for your research, please cite:
 - **SimVPv2**: Tan C, Gao Z, Li S, et al. "SimVPv2: Towards Simple Yet Powerful Spatiotemporal Predictive Learning", *arXiv*, 2024
 - **PredRNNv2**: Wang Y, Wu H, Zhang J, et al. "PredRNN: A Recurrent Neural Network for Spatiotemporal Predictive Learning", *IEEE TPAMI*, 2023, 45(2): 2208–2225
 - **PredFormer**: Tang Y, Qi L, Xie F, et al. "Video Prediction Transformers Without Recurrence or Convolution", *arXiv*, 2025
-
+- **Huang L, Shu Y, Yao J.** Investigation of Physics-Informed Methods for Improving Sea Surface Height Prediction Based on Neural Networks in the South China Sea. *Remote Sensing*, 2025, 17(23): 3838.
 ---
 
 ## Acknowledgements
